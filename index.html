@@ -378,7 +378,15 @@
           // Trạng thái bộ lọc cho tab Kết quả học sinh
           const [resultFilterGrade, setResultFilterGrade] = useState("all");
           const [resultFilterClass, setResultFilterClass] = useState("all");
+          const [resultFilterExam, setResultFilterExam] = useState("all");
           const [resultSearch, setResultSearch] = useState("");
+
+          // Trạng thái Đổi mật khẩu Giáo viên
+          const [adminPassword, setAdminPassword] = useState(() => localStorage.getItem("qc_admin_password") || "quynhchau2026");
+          const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
+          const [oldAdminPass, setOldAdminPass] = useState("");
+          const [newAdminPass, setNewAdminPass] = useState("");
+          const [confirmAdminPass, setConfirmAdminPass] = useState("");
 
           // Trạng thái bộ lọc cho tab Danh sách học sinh
           const [studentFilterGrade, setStudentFilterGrade] = useState("all");
@@ -388,7 +396,7 @@
           // Trạng thái làm bài thi
           const [currentExam, setCurrentExam] = useState(null);
           const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
-          const [studentAnswers, setStudentAnswers] = useState({}); // { questionId: selectedIndex }
+          const [studentAnswers, setStudentAnswers] = useState({}); // { questionId: answerData }
           const [timeLeft, setTimeLeft] = useState(0); // giây
           const timerRef = useRef(null);
           const [showConfirmSubmit, setShowConfirmSubmit] = useState(false);
@@ -399,10 +407,23 @@
 
           // Trạng thái quản lý đề thi và câu hỏi ở trang giáo viên
           const [selectedExamForEdit, setSelectedExamForEdit] = useState(null);
+          const [newQuestionType, setNewQuestionType] = useState("single"); // 'single', 'matching', 'drag_drop'
           const [newQuestionText, setNewQuestionText] = useState("");
           const [newOptions, setNewOptions] = useState(["", "", "", ""]);
           const [newCorrectAnswer, setNewCorrectAnswer] = useState(0);
           const [newExplanation, setNewExplanation] = useState("");
+
+          // Trạng thái dạng Nối cột (Matching)
+          const [matchingPairs, setMatchingPairs] = useState([
+            { left: "", right: "" },
+            { left: "", right: "" },
+            { left: "", right: "" },
+            { left: "", right: "" }
+          ]);
+
+          // Trạng thái dạng Kéo thả / Điền từ (Drag & Drop)
+          const [dragWordsText, setDragWordsText] = useState(""); // Các từ cách nhau dấu phẩy
+          const [dragAnswersMap, setDragAnswersMap] = useState({}); // { "1": "Bàn phím", "2": "Màn hình" }
 
           // Trạng thái tạo đề thi mới & chỉnh sửa tiêu đề/thông tin đề thi
           const [showCreateExamModal, setShowCreateExamModal] = useState(false);
@@ -545,7 +566,7 @@
 
             // 1. Tài khoản Giáo viên (Admin)
             if (cleanedUsername === "admin") {
-              if (password === "quynhchau2026") {
+              if (password === adminPassword) {
                 setCurrentScreen("teacher_dashboard");
                 setLoginUsername("");
                 setLoginPassword("");
@@ -608,6 +629,58 @@
           const handleLogout = () => {
             setActiveStudent(null);
             setCurrentScreen("login");
+          };
+
+          const handleChangeAdminPassword = async (e) => {
+            e.preventDefault();
+            if (!oldAdminPass.trim() || !newAdminPass.trim() || !confirmAdminPass.trim()) {
+              alert("Vui lòng điền đầy đủ các thông tin mật khẩu.");
+              return;
+            }
+            if (newAdminPass.trim() !== confirmAdminPass.trim()) {
+              alert("Mật khẩu mới và xác nhận mật khẩu không trùng khớp.");
+              return;
+            }
+            if (newAdminPass.trim().length < 4) {
+              alert("Mật khẩu mới phải có ít nhất 4 ký tự.");
+              return;
+            }
+
+            if (isOnlineServer) {
+              try {
+                const res = await fetch('/api/admin/password', {
+                  method: 'PUT',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ oldPassword: oldAdminPass.trim(), newPassword: newAdminPass.trim() })
+                });
+                const data = await res.json();
+                if (!res.ok) {
+                  alert(data.message || "Đổi mật khẩu không thành công.");
+                  return;
+                }
+                setAdminPassword(newAdminPass.trim());
+                localStorage.setItem("qc_admin_password", newAdminPass.trim());
+                alert("Đã cập nhật mật khẩu Giáo viên thành công!");
+                setShowChangePasswordModal(false);
+                setOldAdminPass("");
+                setNewAdminPass("");
+                setConfirmAdminPass("");
+              } catch (err) {
+                alert("Lỗi kết nối Server khi đổi mật khẩu.");
+              }
+            } else {
+              if (oldAdminPass.trim() !== adminPassword) {
+                alert("Mật khẩu hiện tại không chính xác.");
+                return;
+              }
+              setAdminPassword(newAdminPass.trim());
+              localStorage.setItem("qc_admin_password", newAdminPass.trim());
+              alert("Đã cập nhật mật khẩu Giáo viên thành công!");
+              setShowChangePasswordModal(false);
+              setOldAdminPass("");
+              setNewAdminPass("");
+              setConfirmAdminPass("");
+            }
           };
 
           // Tiện ích tự động tạo tên đăng nhập không dấu từ họ tên học sinh
@@ -1103,8 +1176,30 @@
 
             let correctCount = 0;
             currentExam.questions.forEach((q) => {
-              if (studentAnswers[q.id] === q.answer) {
-                correctCount++;
+              const qType = q.type || "single";
+              const sAns = studentAnswers[q.id];
+
+              if (qType === "single") {
+                if (sAns === q.answer) {
+                  correctCount++;
+                }
+              } else if (qType === "matching") {
+                if (sAns && typeof sAns === "object" && Array.isArray(q.matchingPairs)) {
+                  let isAllMatch = true;
+                  q.matchingPairs.forEach((pair, idx) => {
+                    if (sAns[idx] !== pair.right) isAllMatch = false;
+                  });
+                  if (isAllMatch) correctCount++;
+                }
+              } else if (qType === "drag_drop") {
+                if (sAns && typeof sAns === "object" && q.dragAnswers) {
+                  const keys = Object.keys(q.dragAnswers);
+                  let isAllBlanksMatch = keys.length > 0;
+                  keys.forEach(k => {
+                    if (sAns[k] !== q.dragAnswers[k]) isAllBlanksMatch = false;
+                  });
+                  if (isAllBlanksMatch) correctCount++;
+                }
               }
             });
 
@@ -1361,21 +1456,45 @@
 
           const handleAddQuestion = (e) => {
             e.preventDefault();
-            if (!newQuestionText.trim() || newOptions.some((opt) => !opt.trim())) {
-              alert("Vui lòng điền nội dung câu hỏi và tất cả 4 đáp án lựa chọn.");
+            if (!newQuestionText.trim()) {
+              alert("Vui lòng nhập nội dung câu hỏi.");
               return;
+            }
+
+            let newQuestion = {
+              id: "q_" + Date.now(),
+              type: newQuestionType || "single",
+              question: newQuestionText.trim(),
+              explanation: newExplanation.trim() || "Chưa có lời giải thích chi tiết."
+            };
+
+            if (newQuestionType === "single" || !newQuestionType) {
+              if (newOptions.some((opt) => !opt.trim())) {
+                alert("Vui lòng nhập đầy đủ cả 4 phương án lựa chọn.");
+                return;
+              }
+              newQuestion.options = [...newOptions];
+              newQuestion.answer = newCorrectAnswer;
+            } else if (newQuestionType === "matching") {
+              const validPairs = matchingPairs.filter(p => p.left.trim() && p.right.trim());
+              if (validPairs.length < 2) {
+                alert("Vui lòng nhập ít nhất 2 cặp vế đối ứng cần nối.");
+                return;
+              }
+              newQuestion.matchingPairs = validPairs.map(p => ({ left: p.left.trim(), right: p.right.trim() }));
+            } else if (newQuestionType === "drag_drop") {
+              const words = dragWordsText.split(',').map(w => w.trim()).filter(Boolean);
+              if (words.length < 2) {
+                alert("Vui lòng nhập các từ gợi ý cách nhau bởi dấu phẩy (ít nhất 2 từ).");
+                return;
+              }
+              newQuestion.dragWords = words;
+              newQuestion.dragAnswers = { ...dragAnswersMap };
             }
 
             let updatedQuestionsList = [];
             const updatedExams = exams.map((exam) => {
               if (exam.id === selectedExamForEdit.id) {
-                const newQuestion = {
-                  id: "q_" + Date.now(),
-                  question: newQuestionText.trim(),
-                  options: [...newOptions],
-                  answer: newCorrectAnswer,
-                  explanation: newExplanation.trim() || "Chưa có lời giải thích chi tiết."
-                };
                 const updatedQuestions = [...exam.questions, newQuestion];
                 updatedQuestionsList = updatedQuestions;
                 setSelectedExamForEdit({
@@ -1403,6 +1522,14 @@
             setNewQuestionText("");
             setNewOptions(["", "", "", ""]);
             setNewCorrectAnswer(0);
+            setMatchingPairs([
+              { left: "", right: "" },
+              { left: "", right: "" },
+              { left: "", right: "" },
+              { left: "", right: "" }
+            ]);
+            setDragWordsText("");
+            setDragAnswersMap({});
             setNewExplanation("");
             alert("Thêm câu hỏi mới thành công!");
           };
@@ -2074,41 +2201,153 @@
                         </span>
                       </div>
 
-                      <h4 className="text-lg md:text-xl font-bold text-gray-800 mb-8 leading-relaxed">
-                        {q.question}
-                      </h4>
+                      {/* Nội dung câu hỏi theo Dạng */}
+                      {(!q.type || q.type === "single") && (
+                        <>
+                          <h4 className="text-lg md:text-xl font-bold text-gray-800 mb-8 leading-relaxed">
+                            {q.question}
+                          </h4>
+                          <div className="grid grid-cols-1 gap-4 mb-8">
+                            {Array.isArray(q.options) && q.options.map((option, index) => {
+                              const prefix = ["A", "B", "C", "D"][index];
+                              const isSelected = studentAnswers[q.id] === index;
 
-                      <div className="grid grid-cols-1 gap-4 mb-8">
-                        {q.options.map((option, index) => {
-                          const prefix = ["A", "B", "C", "D"][index];
-                          const isSelected = studentAnswers[q.id] === index;
+                              return (
+                                <button
+                                  key={index}
+                                  onClick={() => selectAnswer(q.id, index)}
+                                  className={`w-full text-left p-4 rounded-2xl border-2 transition-all duration-200 flex items-center gap-4 group ${
+                                    isSelected
+                                      ? "bg-indigo-50 border-indigo-600 shadow-md scale-[1.01]"
+                                      : "bg-white border-gray-200 hover:border-indigo-300 hover:bg-slate-50"
+                                  }`}
+                                >
+                                  <span
+                                    className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold text-base transition-colors ${
+                                      isSelected
+                                        ? "bg-indigo-600 text-white"
+                                        : "bg-gray-100 text-gray-500 group-hover:bg-indigo-100 group-hover:text-indigo-600"
+                                    }`}
+                                  >
+                                    {prefix}
+                                  </span>
+                                  <span className={`text-base font-semibold ${isSelected ? "text-indigo-950 font-black" : "text-gray-700"}`}>
+                                    {option}
+                                  </span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </>
+                      )}
 
-                          return (
-                            <button
-                              key={index}
-                              onClick={() => selectAnswer(q.id, index)}
-                              className={`w-full text-left p-4 rounded-2xl border-2 transition-all duration-200 flex items-center gap-4 group ${
-                                isSelected
-                                  ? "bg-indigo-50 border-indigo-600 shadow-md scale-[1.01]"
-                                  : "bg-white border-gray-200 hover:border-indigo-300 hover:bg-slate-50"
-                              }`}
-                            >
-                              <span
-                                className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold text-base transition-colors ${
-                                  isSelected
-                                    ? "bg-indigo-600 text-white"
-                                    : "bg-gray-100 text-gray-500 group-hover:bg-indigo-100 group-hover:text-indigo-600"
-                                }`}
-                              >
-                                {prefix}
-                              </span>
-                              <span className={`text-base font-semibold ${isSelected ? "text-indigo-950 font-black" : "text-gray-700"}`}>
-                                {option}
-                              </span>
-                            </button>
-                          );
-                        })}
-                      </div>
+                      {q.type === "matching" && (
+                        <div className="space-y-6 mb-8">
+                          <div className="bg-indigo-50/70 p-4 rounded-2xl border border-indigo-100 text-sm text-indigo-950 font-bold flex items-center gap-2">
+                            <i className="fas fa-link text-indigo-600"></i>
+                            <span>Nối vế ở Cột A tương ứng với đáp án thích hợp ở Cột B:</span>
+                          </div>
+                          <h4 className="text-lg font-bold text-gray-800 leading-relaxed">{q.question}</h4>
+
+                          <div className="space-y-4">
+                            {Array.isArray(q.matchingPairs) && q.matchingPairs.map((pair, pIdx) => {
+                              const currentSelected = (studentAnswers[q.id] || {})[pIdx] || "";
+
+                              return (
+                                <div key={pIdx} className="bg-slate-50 p-4 rounded-2xl border border-gray-200 grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
+                                  <div className="font-bold text-gray-800 text-base flex items-center gap-2">
+                                    <span className="w-7 h-7 rounded-lg bg-indigo-600 text-white text-xs font-black flex items-center justify-center">
+                                      {pIdx + 1}
+                                    </span>
+                                    <span>{pair.left}</span>
+                                  </div>
+
+                                  <div className="flex items-center gap-2">
+                                    <i className="fas fa-arrow-right text-gray-400 hidden md:inline-block"></i>
+                                    <select
+                                      value={currentSelected}
+                                      onChange={(e) => {
+                                        const val = e.target.value;
+                                        setStudentAnswers(prev => ({
+                                          ...prev,
+                                          [q.id]: { ...(prev[q.id] || {}), [pIdx]: val }
+                                        }));
+                                      }}
+                                      className="w-full px-4 py-2.5 rounded-xl border border-indigo-200 bg-white font-bold text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm"
+                                    >
+                                      <option value="">-- Chọn ghép nối phù hợp --</option>
+                                      {q.matchingPairs.map((pRight, rIdx) => (
+                                        <option key={rIdx} value={pRight.right}>
+                                          {pRight.right}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      {q.type === "drag_drop" && (
+                        <div className="space-y-6 mb-8">
+                          <div className="bg-indigo-50/70 p-4 rounded-2xl border border-indigo-100 text-sm text-indigo-950 font-bold flex items-center gap-2">
+                            <i className="fas fa-hand-pointer text-indigo-600"></i>
+                            <span>Chọn từ thích hợp để điền vào các vị trí còn thiếu [1], [2]...</span>
+                          </div>
+                          
+                          <h4 className="text-lg md:text-xl font-bold text-gray-800 leading-relaxed bg-white p-4 rounded-2xl border border-gray-200 shadow-sm">
+                            {q.question}
+                          </h4>
+
+                          {/* Từ gợi ý */}
+                          <div className="bg-slate-50 p-4 rounded-2xl border border-gray-200 space-y-2">
+                            <span className="text-xs font-extrabold text-gray-500 uppercase tracking-wider block">Ngân hàng từ gợi ý:</span>
+                            <div className="flex flex-wrap gap-2.5">
+                              {Array.isArray(q.dragWords) && q.dragWords.map((word, wIdx) => (
+                                <span key={wIdx} className="bg-indigo-600 text-white px-3.5 py-1.5 rounded-xl text-sm font-bold shadow-sm">
+                                  {word}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* Các ô điền đáp án */}
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            {q.dragAnswers && Object.keys(q.dragAnswers).map((blankKey) => {
+                              const currentWord = (studentAnswers[q.id] || {})[blankKey] || "";
+
+                              return (
+                                <div key={blankKey} className="bg-white p-4 rounded-2xl border-2 border-indigo-100 space-y-2 shadow-sm">
+                                  <label className="text-xs font-bold text-indigo-700 flex items-center gap-1.5">
+                                    <i className="fas fa-edit"></i>
+                                    Vị trí trống [{blankKey}]:
+                                  </label>
+                                  <select
+                                    value={currentWord}
+                                    onChange={(e) => {
+                                      const val = e.target.value;
+                                      setStudentAnswers(prev => ({
+                                        ...prev,
+                                        [q.id]: { ...(prev[q.id] || {}), [blankKey]: val }
+                                      }));
+                                    }}
+                                    className="w-full px-4 py-2.5 rounded-xl border border-gray-200 bg-slate-50 font-extrabold text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                  >
+                                    <option value="">-- Chọn từ điền vào [{blankKey}] --</option>
+                                    {q.dragWords && q.dragWords.map((w, wIdx) => (
+                                      <option key={wIdx} value={w}>
+                                        {w}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
                     </div>
 
                     <div className="flex items-center justify-between pt-4 border-t border-gray-100">
@@ -2345,9 +2584,30 @@
                       if (!exam) return <p className="text-gray-500 text-center">Không tìm thấy dữ liệu đề thi.</p>;
 
                       return exam.questions.map((question, qIdx) => {
+                        const qType = question.type || "single";
                         const selectedAns = latestResult.answers[question.id];
-                        const correctAns = question.answer;
-                        const isCorrect = selectedAns === correctAns;
+                        let isCorrect = false;
+
+                        if (qType === "single") {
+                          isCorrect = selectedAns === question.answer;
+                        } else if (qType === "matching") {
+                          if (selectedAns && typeof selectedAns === "object" && Array.isArray(question.matchingPairs)) {
+                            let matchAll = true;
+                            question.matchingPairs.forEach((p, pIdx) => {
+                              if (selectedAns[pIdx] !== p.right) matchAll = false;
+                            });
+                            isCorrect = matchAll;
+                          }
+                        } else if (qType === "drag_drop") {
+                          if (selectedAns && typeof selectedAns === "object" && question.dragAnswers) {
+                            const keys = Object.keys(question.dragAnswers);
+                            let matchAll = keys.length > 0;
+                            keys.forEach(k => {
+                              if (selectedAns[k] !== question.dragAnswers[k]) matchAll = false;
+                            });
+                            isCorrect = matchAll;
+                          }
+                        }
 
                         return (
                           <div
@@ -2357,7 +2617,7 @@
                             } transition-all duration-200`}
                           >
                             <div className="flex items-center justify-between mb-4">
-                              <span className="text-xs font-bold text-gray-400">Câu hỏi {qIdx + 1}</span>
+                              <span className="text-xs font-bold text-gray-400">Câu hỏi {qIdx + 1} ({qType === "matching" ? "Nối cột" : qType === "drag_drop" ? "Kéo thả" : "Trắc nghiệm"})</span>
                               <span
                                 className={`text-xs font-bold px-2.5 py-1 rounded-full flex items-center gap-1 ${
                                   isCorrect ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"
@@ -2372,31 +2632,66 @@
                               {question.question}
                             </h4>
 
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
-                              {question.options.map((opt, optIdx) => {
-                                const optPrefix = ["A", "B", "C", "D"][optIdx];
-                                const isStudentChoice = selectedAns === optIdx;
-                                const isCorrectChoice = correctAns === optIdx;
+                            {qType === "single" && Array.isArray(question.options) && (
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+                                {question.options.map((opt, optIdx) => {
+                                  const optPrefix = ["A", "B", "C", "D"][optIdx];
+                                  const isStudentChoice = selectedAns === optIdx;
+                                  const isCorrectChoice = question.answer === optIdx;
 
-                                return (
-                                  <div
-                                    key={optIdx}
-                                    className={`p-3.5 rounded-xl border flex items-center gap-3 text-sm font-semibold transition ${
-                                      isCorrectChoice ? "bg-emerald-50 border-emerald-500 text-emerald-950 font-black" : isStudentChoice ? "bg-rose-50 border-rose-500 text-rose-950" : "bg-gray-50 border-gray-100 text-gray-500"
-                                    }`}
-                                  >
-                                    <span
-                                      className={`w-7 h-7 rounded-lg flex items-center justify-center font-bold text-xs ${
-                                        isCorrectChoice ? "bg-emerald-600 text-white" : isStudentChoice ? "bg-rose-600 text-white" : "bg-gray-200 text-gray-500"
+                                  return (
+                                    <div
+                                      key={optIdx}
+                                      className={`p-3.5 rounded-xl border flex items-center gap-3 text-sm font-semibold transition ${
+                                        isCorrectChoice ? "bg-emerald-50 border-emerald-500 text-emerald-950 font-black" : isStudentChoice ? "bg-rose-50 border-rose-500 text-rose-950" : "bg-gray-50 border-gray-100 text-gray-500"
                                       }`}
                                     >
-                                      {optPrefix}
-                                    </span>
-                                    <span>{opt}</span>
-                                  </div>
-                                );
-                              })}
-                            </div>
+                                      <span
+                                        className={`w-7 h-7 rounded-lg flex items-center justify-center font-bold text-xs ${
+                                          isCorrectChoice ? "bg-emerald-600 text-white" : isStudentChoice ? "bg-rose-600 text-white" : "bg-gray-200 text-gray-500"
+                                        }`}
+                                      >
+                                        {optPrefix}
+                                      </span>
+                                      <span>{opt}</span>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+
+                            {qType === "matching" && Array.isArray(question.matchingPairs) && (
+                              <div className="space-y-2 mb-4 text-xs font-semibold">
+                                {question.matchingPairs.map((p, pIdx) => {
+                                  const studentRight = (selectedAns || {})[pIdx];
+                                  const pairCorrect = studentRight === p.right;
+
+                                  return (
+                                    <div key={pIdx} className={`p-3 rounded-xl border flex items-center justify-between ${pairCorrect ? "bg-emerald-50 border-emerald-200 text-emerald-900" : "bg-rose-50 border-rose-200 text-rose-900"}`}>
+                                      <span><b>{p.left}</b> → <i>{studentRight || "(Chưa nối)"}</i></span>
+                                      <span className="font-bold">{pairCorrect ? "✓ Đúng" : `✗ (Đáp án đúng: ${p.right})`}</span>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+
+                            {qType === "drag_drop" && question.dragAnswers && (
+                              <div className="space-y-2 mb-4 text-xs font-semibold">
+                                {Object.keys(question.dragAnswers).map((k) => {
+                                  const studentVal = (selectedAns || {})[k];
+                                  const correctVal = question.dragAnswers[k];
+                                  const isBlankCorrect = studentVal === correctVal;
+
+                                  return (
+                                    <div key={k} className={`p-3 rounded-xl border flex items-center justify-between ${isBlankCorrect ? "bg-emerald-50 border-emerald-200 text-emerald-900" : "bg-rose-50 border-rose-200 text-rose-900"}`}>
+                                      <span>Vị trí [{k}]: <i>{studentVal || "(Chưa điền)"}</i></span>
+                                      <span className="font-bold">{isBlankCorrect ? "✓ Đúng" : `✗ (Đáp án đúng: ${correctVal})`}</span>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
 
                             <div className="bg-indigo-50/50 rounded-2xl p-4 border border-indigo-50/80 text-xs text-indigo-900 flex gap-2">
                               <i className="fas fa-lightbulb text-sm text-amber-500 mt-0.5"></i>
@@ -2420,17 +2715,25 @@
           // 6. Màn hình quản trị của Giáo viên
           const renderTeacherDashboard = () => (
             <div className="space-y-8 animate-fade-in">
-              <div className="bg-gradient-to-r from-teal-600 to-emerald-600 rounded-3xl p-6 text-white shadow-lg flex justify-between items-center">
+              <div className="bg-gradient-to-r from-teal-600 to-emerald-600 rounded-3xl p-6 text-white shadow-lg flex justify-between items-center flex-wrap gap-4">
                 <div className="space-y-1">
                   <span className="bg-white/20 text-white text-xs font-bold px-3 py-1 rounded-full">Hệ thống Quản lý</span>
                   <h2 className="text-2xl font-black">Bảng điều khiển của Giáo viên</h2>
                 </div>
-                <button
-                  onClick={handleLogout}
-                  className="bg-white/10 hover:bg-white/20 border border-white/20 px-4 py-2 rounded-xl text-sm font-bold transition flex items-center gap-1.5"
-                >
-                  <i className="fas fa-sign-out-alt"></i>Đăng xuất
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setShowChangePasswordModal(true)}
+                    className="bg-white/10 hover:bg-white/20 border border-white/20 px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5"
+                  >
+                    <i className="fas fa-key text-amber-300"></i>Đổi mật khẩu
+                  </button>
+                  <button
+                    onClick={handleLogout}
+                    className="bg-white/10 hover:bg-white/20 border border-white/20 px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5"
+                  >
+                    <i className="fas fa-sign-out-alt"></i>Đăng xuất
+                  </button>
+                </div>
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
@@ -2480,30 +2783,98 @@
                 {/* Nội dung bên phải */}
                 <div className="lg:col-span-3 bg-white rounded-3xl p-6 md:p-8 shadow-md border border-gray-100">
                   {teacherTab === "results" && (() => {
-                    const uniqueResultClasses = Array.from(new Set(results.map((r) => r.studentClass))).filter(Boolean).sort();
+                    const uniqueResultClasses = Array.from(new Set(students.map((s) => s.class).concat(results.map((r) => r.studentClass)))).filter(Boolean).sort();
                     
-                    const filteredResults = results.filter((r) => {
-                      const matchGrade = resultFilterGrade === "all" || r.studentGrade.toString() === resultFilterGrade;
-                      const matchClass = resultFilterClass === "all" || r.studentClass === resultFilterClass;
-                      const matchSearch = !resultSearch.trim() || 
-                        r.studentName.toLowerCase().includes(resultSearch.toLowerCase().trim()) ||
-                        (r.examTitle && r.examTitle.toLowerCase().includes(resultSearch.toLowerCase().trim()));
-                      return matchGrade && matchClass && matchSearch;
-                    });
+                    // Danh sách kết quả và học sinh phù hợp bộ lọc
+                    let displayRows = [];
+
+                    if (resultFilterExam !== "all") {
+                      // Nếu chọn cụ thể 1 Đề thi -> Liệt kê TOÀN BỘ học sinh của Lớp/Khối chọn (bao gồm học sinh chưa thi)
+                      const targetExam = exams.find(e => e.id === resultFilterExam);
+                      const matchingStudents = students.filter(s => {
+                        const matchGrade = resultFilterGrade === "all" || s.grade.toString() === resultFilterGrade;
+                        const matchClass = resultFilterClass === "all" || s.class === resultFilterClass;
+                        const matchSearch = !resultSearch.trim() ||
+                          s.name.toLowerCase().includes(resultSearch.toLowerCase().trim()) ||
+                          s.username.toLowerCase().includes(resultSearch.toLowerCase().trim());
+                        return matchGrade && matchClass && matchSearch;
+                      });
+
+                      displayRows = matchingStudents.map(st => {
+                        const res = results.find(r => r.studentId === st.id && r.examId === resultFilterExam);
+                        if (res) {
+                          return { ...res, isTested: true, student: st };
+                        }
+                        return {
+                          id: "notest_" + st.id,
+                          studentId: st.id,
+                          studentName: st.name,
+                          studentClass: st.class,
+                          studentGrade: st.grade,
+                          examId: resultFilterExam,
+                          examTitle: targetExam ? targetExam.title : "Đề thi",
+                          score: null,
+                          correctCount: 0,
+                          totalQuestions: targetExam ? targetExam.questions.length : 0,
+                          durationTaken: "-",
+                          date: "-",
+                          isTested: false,
+                          student: st
+                        };
+                      });
+                    } else {
+                      // Nếu chọn Tất cả đề thi -> Liệt kê kết quả bài thi đã làm
+                      const testedRows = results.filter((r) => {
+                        const matchGrade = resultFilterGrade === "all" || r.studentGrade.toString() === resultFilterGrade;
+                        const matchClass = resultFilterClass === "all" || r.studentClass === resultFilterClass;
+                        const matchSearch = !resultSearch.trim() || 
+                          r.studentName.toLowerCase().includes(resultSearch.toLowerCase().trim()) ||
+                          (r.examTitle && r.examTitle.toLowerCase().includes(resultSearch.toLowerCase().trim()));
+                        return matchGrade && matchClass && matchSearch;
+                      }).map(r => ({ ...r, isTested: true }));
+
+                      // Thêm học sinh chưa làm bài nào trong hệ thống
+                      const testedStudentIds = new Set(results.map(r => r.studentId));
+                      const unTestedStudents = students.filter(s => {
+                        const matchGrade = resultFilterGrade === "all" || s.grade.toString() === resultFilterGrade;
+                        const matchClass = resultFilterClass === "all" || s.class === resultFilterClass;
+                        const matchSearch = !resultSearch.trim() || s.name.toLowerCase().includes(resultSearch.toLowerCase().trim());
+                        return !testedStudentIds.has(s.id) && matchGrade && matchClass && matchSearch;
+                      });
+
+                      const unTestedRows = unTestedStudents.map(st => ({
+                        id: "notest_" + st.id,
+                        studentId: st.id,
+                        studentName: st.name,
+                        studentClass: st.class,
+                        studentGrade: st.grade,
+                        examId: "none",
+                        examTitle: "Chưa thi bài nào",
+                        score: null,
+                        correctCount: 0,
+                        totalQuestions: 0,
+                        durationTaken: "-",
+                        date: "-",
+                        isTested: false,
+                        student: st
+                      }));
+
+                      displayRows = [...testedRows, ...unTestedRows];
+                    }
 
                     return (
                       <div className="space-y-6">
                         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-gray-100 pb-4">
                           <div>
-                            <h3 className="text-xl font-black text-gray-800">Bảng điểm thi học sinh</h3>
+                            <h3 className="text-xl font-black text-gray-800">Bảng điểm thi & Trạng thái học sinh</h3>
                             <p className="text-xs text-gray-400 mt-0.5">
-                              Hiển thị <span className="font-bold text-gray-700">{filteredResults.length}</span> / {results.length} bài thi
+                              Hiển thị <span className="font-bold text-gray-700">{displayRows.length}</span> học sinh ({displayRows.filter(r => r.isTested).length} đã thi, {displayRows.filter(r => !r.isTested).length} chưa thi)
                             </p>
                           </div>
                           
                           {/* Nút Tải kết quả CSV/Excel */}
                           <button
-                            onClick={() => exportResultsToCSV(filteredResults, resultFilterClass, resultFilterGrade)}
+                            onClick={() => exportResultsToCSV(results, resultFilterClass, resultFilterGrade)}
                             className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs py-2.5 px-4 rounded-xl shadow hover:shadow-emerald-100 transition flex items-center gap-2"
                           >
                             <i className="fas fa-file-excel text-base"></i>
@@ -2511,8 +2882,8 @@
                           </button>
                         </div>
 
-                        {/* Thanh bộ lọc theo Khối, Lớp, Tìm kiếm */}
-                        <div className="bg-slate-50 p-4 rounded-2xl border border-gray-100 grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
+                        {/* Thanh bộ lọc theo Khối, Lớp, Tiêu đề Bài thi, Tìm kiếm */}
+                        <div className="bg-slate-50 p-4 rounded-2xl border border-gray-100 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-sm">
                           <div>
                             <label className="block text-[11px] font-bold text-gray-500 mb-1">
                               <i className="fas fa-filter mr-1 text-teal-600"></i>Lọc theo Khối:
@@ -2552,6 +2923,24 @@
 
                           <div>
                             <label className="block text-[11px] font-bold text-gray-500 mb-1">
+                              <i className="fas fa-book mr-1 text-teal-600"></i>Lọc theo Tiêu đề Bài thi:
+                            </label>
+                            <select
+                              value={resultFilterExam}
+                              onChange={(e) => setResultFilterExam(e.target.value)}
+                              className="w-full px-3 py-2 rounded-xl border border-gray-200 bg-white text-xs font-bold text-indigo-900 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                            >
+                              <option value="all">Tất cả bài thi</option>
+                              {exams.map((ex) => (
+                                <option key={ex.id} value={ex.id}>
+                                  [{ex.grade}] {ex.title}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div>
+                            <label className="block text-[11px] font-bold text-gray-500 mb-1">
                               <i className="fas fa-search mr-1 text-teal-600"></i>Tìm kiếm học sinh:
                             </label>
                             <input
@@ -2564,12 +2953,10 @@
                           </div>
                         </div>
 
-                        {results.length === 0 ? (
-                          <p className="text-gray-500 text-center py-8">Chưa có kết quả làm bài nào trong hệ thống.</p>
-                        ) : filteredResults.length === 0 ? (
+                        {displayRows.length === 0 ? (
                           <div className="bg-white rounded-2xl p-8 text-center border border-gray-100">
                             <i className="fas fa-search text-3xl text-gray-300 mb-2"></i>
-                            <p className="text-gray-500 text-sm">Không tìm thấy bài thi nào phù hợp với bộ lọc hiện tại.</p>
+                            <p className="text-gray-500 text-sm">Không tìm thấy dữ liệu học sinh phù hợp với bộ lọc hiện tại.</p>
                           </div>
                         ) : (
                           <div className="overflow-x-auto">
@@ -2580,7 +2967,7 @@
                                   <th className="py-3 px-4">Lớp</th>
                                   <th className="py-3 px-4">Khối</th>
                                   <th className="py-3 px-4">Đề thi</th>
-                                  <th className="py-3 px-4 text-center">Điểm số</th>
+                                  <th className="py-3 px-4 text-center">Trạng thái / Điểm</th>
                                   <th className="py-3 px-4 text-center">Số câu đúng</th>
                                   <th className="py-3 px-4 text-center">Thời gian</th>
                                   <th className="py-3 px-4">Ngày thi</th>
@@ -2588,34 +2975,44 @@
                                 </tr>
                               </thead>
                               <tbody>
-                                {filteredResults.map((res) => (
-                                  <tr key={res.id} className="border-b border-gray-50 hover:bg-slate-50 transition">
+                                {displayRows.map((res) => (
+                                  <tr key={res.id} className={`border-b border-gray-50 hover:bg-slate-50 transition ${!res.isTested ? "bg-rose-50/10" : ""}`}>
                                     <td className="py-3.5 px-4 font-bold text-gray-800">{res.studentName}</td>
                                     <td className="py-3.5 px-4 text-gray-600 font-semibold">{res.studentClass}</td>
                                     <td className="py-3.5 px-4 text-gray-600">Khối {res.studentGrade}</td>
                                     <td className="py-3.5 px-4 text-gray-600 line-clamp-1 max-w-[160px]">{res.examTitle}</td>
                                     <td className="py-3.5 px-4 text-center text-base">
-                                      <span
-                                        className={`font-black px-2 py-0.5 rounded ${
-                                          res.score >= 8 ? "bg-emerald-50 text-emerald-600" : res.score >= 5 ? "bg-amber-50 text-amber-600" : "bg-rose-50 text-rose-600"
-                                        }`}
-                                      >
-                                        {res.score}
-                                      </span>
+                                      {res.isTested ? (
+                                        <span
+                                          className={`font-black px-2.5 py-0.5 rounded-lg ${
+                                            res.score >= 8 ? "bg-emerald-50 text-emerald-600 border border-emerald-200" : res.score >= 5 ? "bg-amber-50 text-amber-600 border border-amber-200" : "bg-rose-50 text-rose-600 border border-rose-200"
+                                          }`}
+                                        >
+                                          {res.score} điểm
+                                        </span>
+                                      ) : (
+                                        <span className="text-xs font-extrabold bg-rose-100 text-rose-700 px-2.5 py-1 rounded-lg border border-rose-200 flex items-center justify-center gap-1">
+                                          <i className="fas fa-times-circle"></i>Chưa thi
+                                        </span>
+                                      )}
                                     </td>
                                     <td className="py-3.5 px-4 text-center text-xs font-bold text-gray-600">
-                                      {res.correctCount || 0} / {res.totalQuestions || 0}
+                                      {res.isTested ? `${res.correctCount || 0} / ${res.totalQuestions || 0}` : "-"}
                                     </td>
                                     <td className="py-3.5 px-4 text-center text-xs text-gray-500 font-semibold">{res.durationTaken}</td>
                                     <td className="py-3.5 px-4 text-xs text-gray-500 font-semibold">{res.date}</td>
                                     <td className="py-3.5 px-4 text-center">
-                                      <button
-                                        onClick={() => handleDirectAllowRetake(res.studentId, res.studentName, res.studentClass, res.studentGrade, res.examId, res.examTitle, res.score)}
-                                        className="bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 text-xs font-bold px-2.5 py-1 rounded-lg transition"
-                                        title="Cho phép học sinh này làm lại bài thi"
-                                      >
-                                        <i className="fas fa-redo-alt mr-1"></i>Cho thi lại
-                                      </button>
+                                      {res.isTested ? (
+                                        <button
+                                          onClick={() => handleDirectAllowRetake(res.studentId, res.studentName, res.studentClass, res.studentGrade, res.examId, res.examTitle, res.score)}
+                                          className="bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 text-xs font-bold px-2.5 py-1 rounded-lg transition"
+                                          title="Cho phép học sinh này làm lại bài thi"
+                                        >
+                                          <i className="fas fa-redo-alt mr-1"></i>Cho thi lại
+                                        </button>
+                                      ) : (
+                                        <span className="text-[11px] font-bold text-gray-400 italic">Đang mở đề</span>
+                                      )}
                                     </td>
                                   </tr>
                                 ))}
@@ -3072,6 +3469,35 @@
                                   </button>
                                 </div>
 
+                                {/* Công tắc Bật/Tắt nhanh Xem điểm & Đáp án */}
+                                <div className="grid grid-cols-2 gap-2">
+                                  <button
+                                    onClick={() => toggleExamAllowScore(exam.id)}
+                                    className={`py-1.5 px-2.5 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 border ${
+                                      exam.allowViewScore !== false
+                                        ? "bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-200"
+                                        : "bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-300 font-extrabold"
+                                    }`}
+                                    title="Nhấp để Bật/Tắt chế độ cho học sinh xem điểm số sau khi nộp bài"
+                                  >
+                                    <i className={`fas ${exam.allowViewScore !== false ? "fa-eye text-emerald-600" : "fa-eye-slash text-amber-600"}`}></i>
+                                    {exam.allowViewScore !== false ? "Xem điểm: BẬT" : "Xem điểm: TẮT"}
+                                  </button>
+
+                                  <button
+                                    onClick={() => toggleExamAllowReview(exam.id)}
+                                    className={`py-1.5 px-2.5 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 border ${
+                                      exam.allowViewReview !== false
+                                        ? "bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border-indigo-200"
+                                        : "bg-rose-50 hover:bg-rose-100 text-rose-900 border-rose-300 font-extrabold"
+                                    }`}
+                                    title="Nhấp để Bật/Tắt chế độ cho học sinh xem lại đáp án chi tiết"
+                                  >
+                                    <i className={`fas ${exam.allowViewReview !== false ? "fa-book-open text-indigo-600" : "fa-lock text-rose-600"}`}></i>
+                                    {exam.allowViewReview !== false ? "Xem đáp án: BẬT" : "Xem đáp án: TẮT"}
+                                  </button>
+                                </div>
+
                                 <div className="flex gap-2">
                                   <button
                                     onClick={() => openExamForEdit(exam)}
@@ -3407,63 +3833,178 @@
                         </h4>
 
                         <div>
-                          <label className="block text-xs font-bold text-gray-600 mb-1">Nội dung câu hỏi</label>
+                          <label className="block text-xs font-bold text-gray-600 mb-1">Dạng câu hỏi</label>
+                          <select
+                            value={newQuestionType}
+                            onChange={(e) => setNewQuestionType(e.target.value)}
+                            className="w-full px-3 py-2 rounded-xl border border-gray-200 bg-white text-sm focus:outline-none focus:ring-1 focus:ring-teal-500 font-semibold"
+                          >
+                            <option value="single">Trắc nghiệm 4 lựa chọn (Chọn 1 đáp án đúng)</option>
+                            <option value="matching">Nối cột / Ghép cặp (Nối vế A với vế B)</option>
+                            <option value="drag_drop">Kéo thả / Điền từ vào chỗ trống [1], [2]...</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-bold text-gray-600 mb-1">
+                            {newQuestionType === "drag_drop"
+                              ? "Nội dung câu hỏi (Dùng [1], [2]... cho vị trí chỗ trống)"
+                              : newQuestionType === "matching"
+                              ? "Yêu cầu / Tiêu đề bài nối cột"
+                              : "Nội dung câu hỏi"}
+                          </label>
                           <textarea
                             value={newQuestionText}
                             onChange={(e) => setNewQuestionText(e.target.value)}
                             className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-1 focus:ring-teal-500"
-                            placeholder="Nhập nội dung câu hỏi..."
+                            placeholder={
+                              newQuestionType === "drag_drop"
+                                ? "Ví dụ: Bộ phận [1] dùng để nhập chữ, bộ phận [2] dùng để di chuyển con trỏ."
+                                : newQuestionType === "matching"
+                                ? "Ví dụ: Hãy nối tên thiết bị ở cột trái với chức năng tương ứng ở cột phải:"
+                                : "Nhập nội dung câu hỏi..."
+                            }
                             rows="2"
                             required
                           ></textarea>
                         </div>
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          {newOptions.map((opt, idx) => (
-                            <div key={idx}>
-                              <label className="block text-xs font-bold text-gray-600 mb-1">Đáp án {["A", "B", "C", "D"][idx]}</label>
+                        {(newQuestionType === "single" || !newQuestionType) && (
+                          <>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              {newOptions.map((opt, idx) => (
+                                <div key={idx}>
+                                  <label className="block text-xs font-bold text-gray-600 mb-1">Đáp án {["A", "B", "C", "D"][idx]}</label>
+                                  <input
+                                    type="text"
+                                    value={opt}
+                                    onChange={(e) => {
+                                      const updatedOpts = [...newOptions];
+                                      updatedOpts[idx] = e.target.value;
+                                      setNewOptions(updatedOpts);
+                                    }}
+                                    className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-1 focus:ring-teal-500"
+                                    placeholder={`Đáp án ${["A", "B", "C", "D"][idx]}...`}
+                                    required
+                                  />
+                                </div>
+                              ))}
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              <div>
+                                <label className="block text-xs font-bold text-gray-600 mb-1">Đáp án đúng</label>
+                                <select
+                                  value={newCorrectAnswer}
+                                  onChange={(e) => setNewCorrectAnswer(parseInt(e.target.value))}
+                                  className="w-full px-3 py-2 rounded-xl border border-gray-200 bg-white text-sm focus:outline-none focus:ring-1 focus:ring-teal-500"
+                                >
+                                  <option value="0">Đáp án A</option>
+                                  <option value="1">Đáp án B</option>
+                                  <option value="2">Đáp án C</option>
+                                  <option value="3">Đáp án D</option>
+                                </select>
+                              </div>
+
+                              <div>
+                                <label className="block text-xs font-bold text-gray-600 mb-1">Lời giải thích (tùy chọn)</label>
+                                <input
+                                  type="text"
+                                  value={newExplanation}
+                                  onChange={(e) => setNewExplanation(e.target.value)}
+                                  className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none"
+                                  placeholder="Giải thích vì sao đáp án đó đúng..."
+                                />
+                              </div>
+                            </div>
+                          </>
+                        )}
+
+                        {newQuestionType === "matching" && (
+                          <div className="space-y-3 bg-white p-4 rounded-xl border border-gray-200">
+                            <label className="block text-xs font-bold text-teal-700">Cấu hình các cặp Nối vế (Cột A - Cột B):</label>
+                            {matchingPairs.map((pair, pIdx) => (
+                              <div key={pIdx} className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-center">
+                                <input
+                                  type="text"
+                                  value={pair.left}
+                                  onChange={(e) => {
+                                    const updated = [...matchingPairs];
+                                    updated[pIdx].left = e.target.value;
+                                    setMatchingPairs(updated);
+                                  }}
+                                  placeholder={`Vế A (Cột Trái ${pIdx + 1})...`}
+                                  className="px-3 py-2 rounded-lg border border-gray-200 text-xs focus:outline-none focus:ring-1 focus:ring-teal-500"
+                                />
+                                <input
+                                  type="text"
+                                  value={pair.right}
+                                  onChange={(e) => {
+                                    const updated = [...matchingPairs];
+                                    updated[pIdx].right = e.target.value;
+                                    setMatchingPairs(updated);
+                                  }}
+                                  placeholder={`Vế B ghép đúng (Cột Phải ${pIdx + 1})...`}
+                                  className="px-3 py-2 rounded-lg border border-gray-200 text-xs focus:outline-none focus:ring-1 focus:ring-teal-500"
+                                />
+                              </div>
+                            ))}
+                            <div>
+                              <label className="block text-xs font-bold text-gray-600 mb-1">Lời giải thích (tùy chọn)</label>
                               <input
                                 type="text"
-                                value={opt}
-                                onChange={(e) => {
-                                  const updatedOpts = [...newOptions];
-                                  updatedOpts[idx] = e.target.value;
-                                  setNewOptions(updatedOpts);
-                                }}
-                                className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-1 focus:ring-teal-500"
-                                placeholder={`Đáp án ${["A", "B", "C", "D"][idx]}...`}
-                                required
+                                value={newExplanation}
+                                onChange={(e) => setNewExplanation(e.target.value)}
+                                className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none"
+                                placeholder="Giải thích chi tiết các vế nối..."
                               />
                             </div>
-                          ))}
-                        </div>
-
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          <div>
-                            <label className="block text-xs font-bold text-gray-600 mb-1">Đáp án đúng</label>
-                            <select
-                              value={newCorrectAnswer}
-                              onChange={(e) => setNewCorrectAnswer(parseInt(e.target.value))}
-                              className="w-full px-3 py-2 rounded-xl border border-gray-200 bg-white text-sm focus:outline-none focus:ring-1 focus:ring-teal-500"
-                            >
-                              <option value="0">Đáp án A</option>
-                              <option value="1">Đáp án B</option>
-                              <option value="2">Đáp án C</option>
-                              <option value="3">Đáp án D</option>
-                            </select>
                           </div>
+                        )}
 
-                          <div>
-                            <label className="block text-xs font-bold text-gray-600 mb-1">Lời giải thích (tùy chọn)</label>
-                            <input
-                              type="text"
-                              value={newExplanation}
-                              onChange={(e) => setNewExplanation(e.target.value)}
-                              className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none"
-                              placeholder="Giải thích vì sao đáp án đó đúng..."
-                            />
+                        {newQuestionType === "drag_drop" && (
+                          <div className="space-y-3 bg-white p-4 rounded-xl border border-gray-200">
+                            <div>
+                              <label className="block text-xs font-bold text-teal-700 mb-1">
+                                Các từ / đáp án gợi ý (Cách nhau bằng dấu phẩy):
+                              </label>
+                              <input
+                                type="text"
+                                value={dragWordsText}
+                                onChange={(e) => setDragWordsText(e.target.value)}
+                                placeholder="Ví dụ: Bàn phím, Màn hình, Chuột, Thân máy..."
+                                className="w-full px-3 py-2 rounded-lg border border-gray-200 text-xs focus:outline-none focus:ring-1 focus:ring-teal-500 font-semibold"
+                              />
+                            </div>
+
+                            <div className="space-y-2">
+                              <label className="block text-xs font-bold text-gray-700">Đáp án chính xác cho từng vị trí chỗ trống:</label>
+                              {[1, 2, 3, 4].map((num) => (
+                                <div key={num} className="flex items-center gap-3">
+                                  <span className="text-xs font-bold text-gray-600 w-24">Vị trí [{num}]:</span>
+                                  <input
+                                    type="text"
+                                    value={dragAnswersMap[num] || ""}
+                                    onChange={(e) => setDragAnswersMap({ ...dragAnswersMap, [num]: e.target.value })}
+                                    placeholder={`Đáp án đúng cho [${num}]...`}
+                                    className="flex-1 px-3 py-1.5 rounded-lg border border-gray-200 text-xs focus:outline-none focus:ring-1 focus:ring-teal-500"
+                                  />
+                                </div>
+                              ))}
+                            </div>
+
+                            <div>
+                              <label className="block text-xs font-bold text-gray-600 mb-1">Lời giải thích (tùy chọn)</label>
+                              <input
+                                type="text"
+                                value={newExplanation}
+                                onChange={(e) => setNewExplanation(e.target.value)}
+                                className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none"
+                                placeholder="Giải thích vì sao điền từ đó..."
+                              />
+                            </div>
                           </div>
-                        </div>
+                        )}
 
                         <button
                           type="submit"
@@ -3475,26 +4016,57 @@
 
                       <div className="space-y-4">
                         <h4 className="font-bold text-gray-800 text-sm">Danh sách câu hỏi hiện tại ({selectedExamForEdit.questions.length})</h4>
-                        {selectedExamForEdit.questions.map((q, idx) => (
-                          <div key={q.id} className="p-4 rounded-xl border border-gray-100 flex justify-between gap-4 hover:bg-slate-50 transition">
-                            <div className="space-y-2">
-                              <p className="font-bold text-gray-800 text-sm">Câu {idx + 1}: {q.question}</p>
-                              <div className="grid grid-cols-2 gap-2 text-xs text-gray-500 pl-4 font-semibold">
-                                {q.options.map((opt, oIdx) => (
-                                  <p key={oIdx} className={q.answer === oIdx ? "text-emerald-600 font-bold" : ""}>
-                                    {["A", "B", "C", "D"][oIdx]}. {opt}
-                                  </p>
-                                ))}
+                        {selectedExamForEdit.questions.map((q, idx) => {
+                          const qType = q.type || "single";
+                          return (
+                            <div key={q.id} className="p-4 rounded-xl border border-gray-100 flex justify-between gap-4 hover:bg-slate-50 transition">
+                              <div className="space-y-2 flex-1">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-[10px] font-extrabold bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full">
+                                    {qType === "matching" ? "Nối cột" : qType === "drag_drop" ? "Điền từ" : "Trắc nghiệm"}
+                                  </span>
+                                  <p className="font-bold text-gray-800 text-sm">Câu {idx + 1}: {q.question}</p>
+                                </div>
+
+                                {qType === "single" && Array.isArray(q.options) && (
+                                  <div className="grid grid-cols-2 gap-2 text-xs text-gray-500 pl-4 font-semibold">
+                                    {q.options.map((opt, oIdx) => (
+                                      <p key={oIdx} className={q.answer === oIdx ? "text-emerald-600 font-bold" : ""}>
+                                        {["A", "B", "C", "D"][oIdx]}. {opt}
+                                      </p>
+                                    ))}
+                                  </div>
+                                )}
+
+                                {qType === "matching" && Array.isArray(q.matchingPairs) && (
+                                  <div className="text-xs text-gray-600 pl-4 space-y-1 font-semibold">
+                                    {q.matchingPairs.map((pair, pIdx) => (
+                                      <p key={pIdx}>
+                                        • <b>{pair.left}</b> <i className="fas fa-arrow-right text-gray-400 mx-1"></i> {pair.right}
+                                      </p>
+                                    ))}
+                                  </div>
+                                )}
+
+                                {qType === "drag_drop" && (
+                                  <div className="text-xs text-gray-600 pl-4 space-y-1 font-semibold">
+                                    <p>• Từ gợi ý: <i>{(q.dragWords || []).join(", ")}</i></p>
+                                    {q.dragAnswers && Object.keys(q.dragAnswers).map(k => (
+                                      <p key={k}>• Vị trí [{k}]: <b className="text-emerald-700">{q.dragAnswers[k]}</b></p>
+                                    ))}
+                                  </div>
+                                )}
                               </div>
+
+                              <button
+                                onClick={() => handleDeleteQuestion(q.id)}
+                                className="text-red-500 hover:text-red-700 text-xs font-bold self-start mt-0.5 hover:underline"
+                              >
+                                Xóa
+                              </button>
                             </div>
-                            <button
-                              onClick={() => handleDeleteQuestion(q.id)}
-                              className="text-red-500 hover:text-red-700 text-xs font-bold self-start mt-0.5 hover:underline"
-                            >
-                              Xóa
-                            </button>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </div>
                   )}
@@ -3733,6 +4305,77 @@
                 {currentScreen === "teacher_dashboard" && renderTeacherDashboard()}
               </main>
 
+              {/* Modal Đổi mật khẩu Giáo viên */}
+              {showChangePasswordModal && (
+                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                  <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-gray-100 animate-scale-up space-y-5">
+                    <div className="flex items-center justify-between border-b pb-3">
+                      <h4 className="font-extrabold text-gray-800 text-base flex items-center gap-2">
+                        <i className="fas fa-key text-amber-500"></i>
+                        Đổi mật khẩu Giáo viên
+                      </h4>
+                      <button onClick={() => setShowChangePasswordModal(false)} className="text-gray-400 hover:text-gray-600">
+                        <i className="fas fa-times text-lg"></i>
+                      </button>
+                    </div>
+
+                    <form onSubmit={handleChangeAdminPassword} className="space-y-4">
+                      <div>
+                        <label className="block text-xs font-bold text-gray-700 mb-1">Mật khẩu hiện tại:</label>
+                        <input
+                          type="password"
+                          required
+                          value={oldAdminPass}
+                          onChange={(e) => setOldAdminPass(e.target.value)}
+                          placeholder="Nhập mật khẩu hiện tại..."
+                          className="w-full px-3 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold text-gray-700 mb-1">Mật khẩu mới:</label>
+                        <input
+                          type="password"
+                          required
+                          value={newAdminPass}
+                          onChange={(e) => setNewAdminPass(e.target.value)}
+                          placeholder="Nhập mật khẩu mới (tối thiểu 4 ký tự)..."
+                          className="w-full px-3 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold text-gray-700 mb-1">Xác nhận mật khẩu mới:</label>
+                        <input
+                          type="password"
+                          required
+                          value={confirmAdminPass}
+                          onChange={(e) => setConfirmAdminPass(e.target.value)}
+                          placeholder="Nhập lại mật khẩu mới..."
+                          className="w-full px-3 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        />
+                      </div>
+
+                      <div className="flex justify-end gap-2 pt-2 border-t">
+                        <button
+                          type="button"
+                          onClick={() => setShowChangePasswordModal(false)}
+                          className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold text-xs rounded-xl transition"
+                        >
+                          Hủy bỏ
+                        </button>
+                        <button
+                          type="submit"
+                          className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl transition shadow flex items-center gap-1.5"
+                        >
+                          <i className="fas fa-save"></i> Cập nhật mật khẩu
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+                </div>
+              )}
+
               <footer className="bg-white py-6 border-t border-gray-100 text-center">
                 <div className="max-w-7xl mx-auto px-4 flex flex-col md:flex-row justify-between items-center gap-3 text-xs text-gray-400 font-bold">
                   <p>© 2026 Trường Tiểu học Quỳnh Châu. Thiết kế dành cho học tập.</p>
@@ -3745,7 +4388,7 @@
                             else setCurrentScreen("login");
                           } else {
                             const userPass = prompt("Vui lòng nhập mật khẩu quản trị viên (Giáo viên):");
-                            if (userPass === "quynhchau2026") setCurrentScreen("teacher_dashboard");
+                            if (userPass === adminPassword) setCurrentScreen("teacher_dashboard");
                             else if (userPass !== null) alert("Mật khẩu không chính xác!");
                           }
                         }}

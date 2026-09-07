@@ -13,6 +13,7 @@ app.use(express.static(__dirname));
 
 // Dữ liệu mặc định ban đầu
 const DEFAULT_DATA = {
+  adminPassword: "quynhchau2026",
   students: [],
   exams: [
     {
@@ -251,8 +252,9 @@ app.post('/api/login', (req, res) => {
   const rawUsername = username ? String(username).trim() : "";
   const cleanedUsername = rawUsername.toLowerCase();
   const inputNoTone = removeVietnameseTones(rawUsername);
+  const currentAdminPass = db.adminPassword || "quynhchau2026";
 
-  if (cleanedUsername === "admin" && password === "quynhchau2026") {
+  if (cleanedUsername === "admin" && password === currentAdminPass) {
     return res.json({ success: true, role: "admin", user: { name: "Giáo viên Tin học", username: "admin" } });
   }
 
@@ -277,6 +279,25 @@ app.post('/api/login', (req, res) => {
   }
 
   return res.status(401).json({ success: false, message: "Sai tên đăng nhập hoặc mật khẩu!" });
+});
+
+// 3.5. Thay đổi mật khẩu Giáo viên (Admin)
+app.put('/api/admin/password', (req, res) => {
+  const { oldPassword, newPassword } = req.body;
+  const db = loadDB();
+  const currentPass = db.adminPassword || "quynhchau2026";
+
+  if (oldPassword !== currentPass) {
+    return res.status(400).json({ success: false, message: "Mật khẩu hiện tại của Giáo viên không chính xác!" });
+  }
+
+  if (!newPassword || newPassword.trim().length < 4) {
+    return res.status(400).json({ success: false, message: "Mật khẩu mới phải có ít nhất 4 ký tự!" });
+  }
+
+  db.adminPassword = newPassword.trim();
+  saveDB(db);
+  res.json({ success: true, message: "Đã cập nhật mật khẩu Giáo viên thành công!" });
 });
 
 // 4. Quản lý học sinh
