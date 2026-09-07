@@ -621,6 +621,15 @@
             };
 
             setStudents([...students, newStudent]);
+
+            if (isOnlineServer) {
+              fetch('/api/students', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(newStudent)
+              }).catch(err => console.error("Lỗi đồng bộ thêm học sinh:", err));
+            }
+
             alert(`Đã tạo thành công tài khoản cho học sinh: ${newStudent.name}`);
             
             setTeacherRegName("");
@@ -636,6 +645,11 @@
             }
             setStudents(students.filter(s => s.id !== studentId));
             setResults(results.filter(r => r.studentId !== studentId));
+
+            if (isOnlineServer) {
+              fetch(`/api/students/${studentId}`, { method: 'DELETE' })
+                .catch(err => console.error("Lỗi đồng bộ xóa học sinh:", err));
+            }
           };
 
           const handleTeacherImportStudents = (e) => {
@@ -652,6 +666,7 @@
             }
 
             const newStudentsList = [...students];
+            const newlyAddedStudents = [];
             let addedCount = 0;
             const targetClass = importClass.trim().toUpperCase();
             const targetGrade = parseInt(importGrade);
@@ -677,10 +692,20 @@
               };
 
               newStudentsList.push(newStudent);
+              newlyAddedStudents.push(newStudent);
               addedCount++;
             });
 
             setStudents(newStudentsList);
+
+            if (isOnlineServer && newlyAddedStudents.length > 0) {
+              fetch('/api/students/bulk', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ students: newlyAddedStudents })
+              }).catch(err => console.error("Lỗi đồng bộ import học sinh:", err));
+            }
+
             alert(`Đã nhập thành công danh sách ${addedCount} học sinh vào Khối ${targetGrade} - Lớp ${targetClass}!`);
             
             setImportText("");
@@ -836,18 +861,36 @@
               used: false
             };
             setRetakeRequests([newRequest, ...retakeRequests.filter(r => !(r.studentId === activeStudent.id && r.examId === exam.id))]);
+
+            if (isOnlineServer) {
+              fetch('/api/retakes', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(newRequest)
+              }).catch(err => console.error("Lỗi gửi yêu cầu xin thi lại:", err));
+            }
+
             alert("Đã gửi yêu cầu thi lại thành công! Thầy/cô sẽ xem xét và phê duyệt cho em.");
           };
 
           // Giáo viên bật/tắt nhanh trạng thái mở/khóa đề thi
           const toggleExamOpen = (examId) => {
+            const targetExam = exams.find(e => e.id === examId);
+            const newIsOpen = targetExam ? (targetExam.isOpen === false ? true : false) : true;
             setExams(exams.map(e => {
               if (e.id === examId) {
-                const newIsOpen = e.isOpen === false ? true : false;
                 return { ...e, isOpen: newIsOpen };
               }
               return e;
             }));
+
+            if (isOnlineServer) {
+              fetch(`/api/exams/${examId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ isOpen: newIsOpen })
+              }).catch(err => console.error("Lỗi cập nhật trạng thái mở đề thi:", err));
+            }
           };
 
           // Giáo viên lưu cấu hình hẹn giờ mở đề
@@ -868,6 +911,19 @@
               return ex;
             }));
 
+            if (isOnlineServer) {
+              fetch(`/api/exams/${editingScheduleExam.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  scheduleMode: scheduleMode,
+                  startTime: scheduleStartTime,
+                  endTime: scheduleEndTime,
+                  isOpen: true
+                })
+              }).catch(err => console.error("Lỗi lưu lịch hẹn giờ đề thi:", err));
+            }
+
             alert(`Đã cập nhật cấu hình thời gian mở đề thi "${editingScheduleExam.title}" thành công!`);
             setEditingScheduleExam(null);
           };
@@ -880,6 +936,14 @@
               }
               return req;
             }));
+
+            if (isOnlineServer) {
+              fetch(`/api/retakes/${reqId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ status: "approved", used: false })
+              }).catch(err => console.error("Lỗi đồng bộ duyệt thi lại:", err));
+            }
           };
 
           // Giáo viên từ chối yêu cầu thi lại
@@ -890,12 +954,25 @@
               }
               return req;
             }));
+
+            if (isOnlineServer) {
+              fetch(`/api/retakes/${reqId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ status: "rejected" })
+              }).catch(err => console.error("Lỗi đồng bộ từ chối thi lại:", err));
+            }
           };
 
           // Giáo viên xóa yêu cầu thi lại
           const handleDeleteRetake = (reqId) => {
             if (!confirm("Bạn có chắc chắn muốn xóa yêu cầu thi lại này?")) return;
             setRetakeRequests(retakeRequests.filter(req => req.id !== reqId));
+
+            if (isOnlineServer) {
+              fetch(`/api/retakes/${reqId}`, { method: 'DELETE' })
+                .catch(err => console.error("Lỗi đồng bộ xóa yêu cầu thi lại:", err));
+            }
           };
 
           // Giáo viên chủ động cấp quyền thi lại trực tiếp cho học sinh (từ bảng điểm / danh sách)
@@ -906,6 +983,13 @@
             const existingReq = retakeRequests.find(r => r.studentId === studentId && r.examId === examId);
             if (existingReq) {
               setRetakeRequests(retakeRequests.map(r => r.id === existingReq.id ? { ...r, status: "approved", used: false, approvedTime: new Date().toLocaleString("vi-VN") } : r));
+              if (isOnlineServer) {
+                fetch(`/api/retakes/${existingReq.id}`, {
+                  method: 'PUT',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ status: "approved", used: false })
+                }).catch(err => console.error("Lỗi cấp quyền thi lại:", err));
+              }
             } else {
               const newReq = {
                 id: "req_" + Date.now(),
@@ -922,6 +1006,13 @@
                 approvedTime: new Date().toLocaleString("vi-VN")
               };
               setRetakeRequests([newReq, ...retakeRequests]);
+              if (isOnlineServer) {
+                fetch('/api/retakes', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(newReq)
+                }).catch(err => console.error("Lỗi tạo cấp quyền thi lại:", err));
+              }
             }
             alert(`Đã cấp quyền thi lại thành công cho học sinh ${studentName}!`);
           };
@@ -1054,31 +1145,51 @@
 
           // --- Logic Giáo viên quản lý đề thi, tiêu đề & phân quyền ---
           const toggleExamAllowScore = (examId) => {
+            let updatedVal = true;
             setExams(exams.map(e => {
               if (e.id === examId) {
-                const updated = { ...e, allowViewScore: e.allowViewScore === false ? true : false };
+                updatedVal = e.allowViewScore === false ? true : false;
+                const updated = { ...e, allowViewScore: updatedVal };
                 if (selectedExamForEdit && selectedExamForEdit.id === examId) {
                   setSelectedExamForEdit(updated);
-                  setEditExamAllowScore(updated.allowViewScore);
+                  setEditExamAllowScore(updatedVal);
                 }
                 return updated;
               }
               return e;
             }));
+
+            if (isOnlineServer) {
+              fetch(`/api/exams/${examId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ allowViewScore: updatedVal })
+              }).catch(err => console.error("Lỗi đồng bộ bật/tắt xem điểm:", err));
+            }
           };
 
           const toggleExamAllowReview = (examId) => {
+            let updatedVal = true;
             setExams(exams.map(e => {
               if (e.id === examId) {
-                const updated = { ...e, allowViewReview: e.allowViewReview === false ? true : false };
+                updatedVal = e.allowViewReview === false ? true : false;
+                const updated = { ...e, allowViewReview: updatedVal };
                 if (selectedExamForEdit && selectedExamForEdit.id === examId) {
                   setSelectedExamForEdit(updated);
-                  setEditExamAllowReview(updated.allowViewReview);
+                  setEditExamAllowReview(updatedVal);
                 }
                 return updated;
               }
               return e;
             }));
+
+            if (isOnlineServer) {
+              fetch(`/api/exams/${examId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ allowViewReview: updatedVal })
+              }).catch(err => console.error("Lỗi đồng bộ bật/tắt xem bài:", err));
+            }
           };
 
           const openExamForEdit = (exam) => {
@@ -1099,6 +1210,7 @@
               return;
             }
             const durationNum = parseInt(editExamDuration) || 15;
+            let targetExam = null;
             const updatedExams = exams.map((exam) => {
               if (exam.id === selectedExamForEdit.id) {
                 const updated = {
@@ -1110,12 +1222,22 @@
                   allowViewScore: editExamAllowScore,
                   allowViewReview: editExamAllowReview
                 };
+                targetExam = updated;
                 setSelectedExamForEdit(updated);
                 return updated;
               }
               return exam;
             });
             setExams(updatedExams);
+
+            if (isOnlineServer && targetExam) {
+              fetch(`/api/exams/${targetExam.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(targetExam)
+              }).catch(err => console.error("Lỗi đồng bộ thông tin đề thi:", err));
+            }
+
             setIsEditingExamInfo(false);
             alert("Đã cập nhật tiêu đề và thông tin bài thi thành công!");
           };
@@ -1129,6 +1251,15 @@
                 setSelectedExamForEdit({ ...selectedExamForEdit, title: newTitle.trim() });
                 setEditExamTitle(newTitle.trim());
               }
+
+              if (isOnlineServer) {
+                fetch(`/api/exams/${exam.id}`, {
+                  method: 'PUT',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ title: newTitle.trim() })
+                }).catch(err => console.error("Lỗi đồng bộ đổi tiêu đề:", err));
+              }
+
               alert("Đã đổi tiêu đề bài thi thành công!");
             }
           };
@@ -1154,6 +1285,15 @@
             };
             const updatedExams = [...exams, newExam];
             setExams(updatedExams);
+
+            if (isOnlineServer) {
+              fetch('/api/exams', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(newExam)
+              }).catch(err => console.error("Lỗi đồng bộ tạo đề thi mới:", err));
+            }
+
             setShowCreateExamModal(false);
             setNewExamTitle("");
             setNewExamGrade("3");
@@ -1169,6 +1309,12 @@
             if (!confirm(`Thầy/Cô có chắc chắn muốn XÓA bài thi "${examTitle}" không? Mọi câu hỏi thuộc bài thi này cũng sẽ bị xóa.`)) return;
             const updatedExams = exams.filter((e) => e.id !== examId);
             setExams(updatedExams);
+
+            if (isOnlineServer) {
+              fetch(`/api/exams/${examId}`, { method: 'DELETE' })
+                .catch(err => console.error("Lỗi đồng bộ xóa bài thi:", err));
+            }
+
             if (selectedExamForEdit && selectedExamForEdit.id === examId) {
               setSelectedExamForEdit(null);
             }
@@ -1182,6 +1328,7 @@
               return;
             }
 
+            let updatedQuestionsList = [];
             const updatedExams = exams.map((exam) => {
               if (exam.id === selectedExamForEdit.id) {
                 const newQuestion = {
@@ -1192,6 +1339,7 @@
                   explanation: newExplanation.trim() || "Chưa có lời giải thích chi tiết."
                 };
                 const updatedQuestions = [...exam.questions, newQuestion];
+                updatedQuestionsList = updatedQuestions;
                 setSelectedExamForEdit({
                   ...exam,
                   questions: updatedQuestions
@@ -1205,6 +1353,15 @@
             });
 
             setExams(updatedExams);
+
+            if (isOnlineServer && selectedExamForEdit) {
+              fetch(`/api/exams/${selectedExamForEdit.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ questions: updatedQuestionsList })
+              }).catch(err => console.error("Lỗi đồng bộ thêm câu hỏi:", err));
+            }
+
             setNewQuestionText("");
             setNewOptions(["", "", "", ""]);
             setNewCorrectAnswer(0);
@@ -1215,9 +1372,11 @@
           const handleDeleteQuestion = (questionId) => {
             if (!confirm("Thầy/Cô có chắc chắn muốn xóa câu hỏi này?")) return;
 
+            let updatedQuestionsList = [];
             const updatedExams = exams.map((exam) => {
               if (exam.id === selectedExamForEdit.id) {
                 const updatedQuestions = exam.questions.filter((q) => q.id !== questionId);
+                updatedQuestionsList = updatedQuestions;
                 setSelectedExamForEdit({
                   ...exam,
                   questions: updatedQuestions
@@ -1230,6 +1389,14 @@
               return exam;
             });
             setExams(updatedExams);
+
+            if (isOnlineServer && selectedExamForEdit) {
+              fetch(`/api/exams/${selectedExamForEdit.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ questions: updatedQuestionsList })
+              }).catch(err => console.error("Lỗi đồng bộ xóa câu hỏi:", err));
+            }
           };
 
           // --- Giao diện Từng Screen ---
