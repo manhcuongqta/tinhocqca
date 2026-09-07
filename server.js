@@ -217,16 +217,61 @@ app.get('/api/sync-all', (req, res) => {
   });
 });
 
+// Tiện ích xóa dấu tiếng Việt cho Server
+function removeVietnameseTones(str) {
+  if (!str) return "";
+  str = str.replace(/à|á|ạ|ả|ã|â|ầ|ấ|ậ|ẩ|ẫ|ă|ằ|ắ|ặ|ẳ|ẵ/g,"a"); 
+  str = str.replace(/è|é|ẹ|ẻ|ẽ|ê|ề|ế|ệ|ể|ễ/g,"e"); 
+  str = str.replace(/ì|í|ị|ỉ|ĩ/g,"i"); 
+  str = str.replace(/ò|ó|ọ|ỏ|õ|ô|ồ|ố|ộ|ổ|ỗ|ơ|ờ|ớ|ợ|ở|ỡ/g,"o"); 
+  str = str.replace(/ù|ú|ụ|ủ|ũ|ư|ừ|ứ|ự|ử|ữ/g,"u"); 
+  str = str.replace(/ỳ|ý|ỵ|ỷ|ỹ/g,"y"); 
+  str = str.replace(/đ/g,"d");
+  str = str.replace(/À|Á|Ạ|Ả|Ã|Â|Ầ|Ấ|Ậ|Ẩ|Ẫ|Ă|Ằ|Ắ|Ặ|Ẳ|Ẵ/g, "A");
+  str = str.replace(/È|É|Ẹ|Ẻ|E|Ê|Ề|Ế|Ệ|Ể|Ễ/g, "E");
+  str = str.replace(/Ì|Í|Ị|Ỉ|Ĩ/g, "I");
+  str = str.replace(/Ò|Ó|Ọ|Ỏ|Õ|Ô|Ồ|Ố|Ộ|Ổ|Ỗ|Ơ|Ờ|Ớ|Ợ|Ở|Ỡ/g, "O");
+  str = str.replace(/Ù|Ú|Ụ|Ủ|Ũ|Ư|Ừ|Ứ|Ự|Ử|Ữ/g, "U");
+  str = str.replace(/Ỳ|Ý|Ỵ|Ỷ|Ỹ/g, "Y");
+  str = str.replace(/Đ/g, "D");
+  str = str.replace(/\u0300|\u0301|\u0309|\u0303|\u0323/g, "");
+  str = str.replace(/\u02C6|\u0306|\u031B/g, "");
+  str = str.replace(/ + /g," ");
+  str = str.trim();
+  str = str.replace(/!|@|%|\^|\*|\(|\)|\+|\=|\<|\>|\?|\/|,|\.|\:|\;|\'|\"|\&|\#|\[|\]|~|\$|_|`|-|{|}|\||\\/g," ");
+  str = str.replace(/\s+/g, "");
+  return str.toLowerCase();
+}
+
 // 3. Đăng nhập
 app.post('/api/login', (req, res) => {
   const { username, password } = req.body;
   const db = loadDB();
 
-  if (username === "admin" && password === "quynhchau2026") {
+  const rawUsername = username ? String(username).trim() : "";
+  const cleanedUsername = rawUsername.toLowerCase();
+  const inputNoTone = removeVietnameseTones(rawUsername);
+
+  if (cleanedUsername === "admin" && password === "quynhchau2026") {
     return res.json({ success: true, role: "admin", user: { name: "Giáo viên Tin học", username: "admin" } });
   }
 
-  const student = db.students.find(s => s.username === username && s.password === password);
+  const student = db.students.find(s => {
+    if (String(s.password).trim() !== String(password).trim()) return false;
+
+    const sUsername = String(s.username || "").trim().toLowerCase();
+    const sName = String(s.name || "").trim().toLowerCase();
+    const sNameNoTone = removeVietnameseTones(s.name || "");
+    const sUserBaseNoTone = removeVietnameseTones(sUsername.split('.')[0] || "");
+
+    return (
+      sUsername === cleanedUsername ||
+      sName === cleanedUsername ||
+      sNameNoTone === inputNoTone ||
+      sUserBaseNoTone === inputNoTone
+    );
+  });
+
   if (student) {
     return res.json({ success: true, role: "student", user: student });
   }

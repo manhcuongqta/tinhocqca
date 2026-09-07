@@ -529,18 +529,21 @@
             }, 1500);
           };
 
-          const handleLogin = (e) => {
+          const handleLogin = async (e) => {
             e.preventDefault();
             setLoginError("");
 
-            const cleanedUsername = loginUsername.trim().toLowerCase();
-            const password = loginPassword;
+            const rawUsername = loginUsername ? loginUsername.trim() : "";
+            const password = loginPassword ? loginPassword.trim() : "";
 
-            if (!cleanedUsername || !password) {
+            if (!rawUsername || !password) {
               setLoginError("Vui lòng điền đầy đủ tên đăng nhập và mật khẩu.");
               return;
             }
 
+            const cleanedUsername = rawUsername.toLowerCase();
+
+            // 1. Tài khoản Giáo viên (Admin)
             if (cleanedUsername === "admin") {
               if (password === "quynhchau2026") {
                 setCurrentScreen("teacher_dashboard");
@@ -553,9 +556,44 @@
               }
             }
 
-            const foundStudent = students.find(
-              (s) => s.username === cleanedUsername && s.password === password
-            );
+            // 2. Thử xác thực trực tiếp qua Backend API (nếu có kết nối Server)
+            if (isOnlineServer) {
+              try {
+                const res = await fetch('/api/login', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ username: rawUsername, password: password })
+                });
+                const data = await res.json();
+                if (res.ok && data.success && data.role === "student" && data.user) {
+                  setActiveStudent(data.user);
+                  setCurrentScreen("student_dashboard");
+                  setLoginUsername("");
+                  setLoginPassword("");
+                  return;
+                }
+              } catch (err) {
+                console.error("Lỗi kết nối API đăng nhập:", err);
+              }
+            }
+
+            // 3. Khớp tài khoản linh hoạt với dữ liệu local state
+            const inputNoTone = removeVietnameseTones(rawUsername);
+            const foundStudent = students.find((s) => {
+              if (String(s.password).trim() !== password) return false;
+
+              const sUsername = String(s.username || "").trim().toLowerCase();
+              const sName = String(s.name || "").trim().toLowerCase();
+              const sNameNoTone = removeVietnameseTones(s.name || "");
+              const sUserBaseNoTone = removeVietnameseTones(sUsername.split('.')[0] || "");
+
+              return (
+                sUsername === cleanedUsername ||
+                sName === cleanedUsername ||
+                sNameNoTone === inputNoTone ||
+                sUserBaseNoTone === inputNoTone
+              );
+            });
 
             if (foundStudent) {
               setActiveStudent(foundStudent);
@@ -563,7 +601,7 @@
               setLoginUsername("");
               setLoginPassword("");
             } else {
-              setLoginError("Tên đăng nhập hoặc mật khẩu không chính xác.");
+              setLoginError("Tên đăng nhập hoặc mật khẩu không chính xác. Vui lòng kiểm tra lại thông tin do Giáo viên cấp.");
             }
           };
 
@@ -1413,6 +1451,27 @@
                   <p className="text-gray-500 text-sm mt-1">Đăng nhập tài khoản để vào phòng thi online</p>
                 </div>
 
+                {/* Thông báo trạng thái Server Mạng */}
+                {isOnlineServer ? (
+                  <div className="mb-4 bg-emerald-50 border border-emerald-200 text-emerald-800 p-3 rounded-2xl text-xs flex items-center gap-2.5 shadow-sm">
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping"></span>
+                    <div>
+                      <p className="font-extrabold text-emerald-900">🟢 Máy chủ Mạng đang hoạt động</p>
+                      <p className="text-[11px] text-emerald-700">Dữ liệu tài khoản & kết quả thi được đồng bộ trực tiếp giữa các máy tính.</p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="mb-4 bg-amber-50 border border-amber-200 text-amber-900 p-3 rounded-2xl text-xs flex items-start gap-2.5 shadow-sm">
+                    <i className="fas fa-exclamation-triangle text-amber-600 text-base mt-0.5"></i>
+                    <div>
+                      <p className="font-extrabold text-amber-950">⚠️ Đang chạy ở chế độ Độc lập (Local / file://)</p>
+                      <p className="text-[11px] text-amber-800 mt-0.5 leading-relaxed">
+                        Để đăng nhập tài khoản tạo từ máy tính khác, vui lòng khởi động Server (<code>npm start</code>) và mở web qua IP Máy chủ Giáo viên (Ví dụ: <code>http://192.168.x.x:3000</code>).
+                      </p>
+                    </div>
+                  </div>
+                )}
+
                 {loginError && (
                   <div className="mb-4 bg-rose-50 border-l-4 border-rose-500 text-rose-700 p-3 rounded-lg text-sm flex items-center gap-2">
                     <i className="fas fa-exclamation-circle"></i>
@@ -1424,14 +1483,14 @@
                   <div>
                     <label className="block text-gray-700 text-sm font-semibold mb-2 flex items-center gap-2">
                       <i className="fas fa-user text-indigo-400"></i>
-                      Tên đăng nhập (hoặc 'admin')
+                      Tên đăng nhập / Họ và tên (hoặc 'admin')
                     </label>
                     <input
                       type="text"
                       value={loginUsername}
                       onChange={(e) => setLoginUsername(e.target.value)}
                       className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition text-base"
-                      placeholder="Nhập tên đăng nhập..."
+                      placeholder="Nhập tên đăng nhập hoặc Họ tên học sinh..."
                       required
                     />
                   </div>
