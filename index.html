@@ -1130,6 +1130,11 @@
 
           // --- Logic Thi và Nộp Bài ---
           const startExam = (exam) => {
+            if (activeStudent && String(exam.grade) !== String(activeStudent.grade)) {
+              alert(`Đề thi này dành cho Khối ${exam.grade}. Em là học sinh Khối ${activeStudent.grade} nên không được quyền làm bài thi của khối lớp khác!`);
+              return;
+            }
+
             const access = checkExamAccess(exam);
             if (!access.accessible) {
               alert(access.message);
@@ -1901,12 +1906,15 @@
                           const studentStatus = getStudentExamStatus(exam.id, activeStudent.id);
                           const allowScore = exam.allowViewScore !== false;
                           const allowReview = exam.allowViewReview !== false;
+                          const isSameGrade = String(exam.grade) === String(activeStudent.grade);
 
                           return (
                             <div
                               key={exam.id}
                               className={`bg-white rounded-3xl p-6 shadow-md border-2 transition-all duration-300 flex flex-col justify-between group ${
-                                !access.accessible
+                                !isSameGrade
+                                  ? "border-gray-200 bg-gray-50/60 opacity-80"
+                                  : !access.accessible
                                   ? "border-gray-200 bg-gray-50/70 opacity-90"
                                   : studentStatus.status === "completed"
                                   ? "border-emerald-200 bg-emerald-50/20"
@@ -1921,7 +1929,9 @@
                                 <div className="flex items-center justify-between mb-4">
                                   <span
                                     className={`p-3 rounded-2xl transition duration-300 ${
-                                      !access.accessible
+                                      !isSameGrade
+                                        ? "bg-gray-100 text-gray-400"
+                                        : !access.accessible
                                         ? "bg-rose-50 text-rose-600"
                                         : studentStatus.status === "completed"
                                         ? "bg-emerald-50 text-emerald-600"
@@ -1930,11 +1940,16 @@
                                         : "bg-indigo-50 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white"
                                     }`}
                                   >
-                                    <i className={`fas ${!access.accessible ? "fa-lock" : studentStatus.status === "completed" ? "fa-check-circle" : "fa-laptop-code"} text-xl`}></i>
+                                    <i className={`fas ${!isSameGrade ? "fa-ban" : !access.accessible ? "fa-lock" : studentStatus.status === "completed" ? "fa-check-circle" : "fa-laptop-code"} text-xl`}></i>
                                   </span>
 
                                   {/* Badges trạng thái */}
-                                  {!access.accessible ? (
+                                  {!isSameGrade ? (
+                                    <span className="text-xs font-bold text-gray-500 bg-gray-100 border border-gray-200 px-2.5 py-1 rounded-full flex items-center gap-1">
+                                      <i className="fas fa-lock"></i>
+                                      Khác Khối {activeStudent.grade}
+                                    </span>
+                                  ) : !access.accessible ? (
                                     <span className="text-xs font-bold text-rose-600 bg-rose-50 border border-rose-100 px-2.5 py-1 rounded-full flex items-center gap-1">
                                       <i className="fas fa-lock"></i>
                                       Đã khóa đề
@@ -1964,7 +1979,7 @@
 
                                 <div className="space-y-1">
                                   <div className="flex items-center gap-2">
-                                    <span className="text-[11px] font-bold bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-md">
+                                    <span className={`text-[11px] font-bold px-2 py-0.5 rounded-md ${isSameGrade ? "bg-indigo-50 text-indigo-700" : "bg-gray-100 text-gray-500"}`}>
                                       Khối {exam.grade}
                                     </span>
                                     {!allowScore && (
@@ -1989,7 +2004,12 @@
                                 </p>
 
                                 {/* Thông báo thời gian hoặc lý do khóa */}
-                                {!access.accessible && (
+                                {!isSameGrade ? (
+                                  <div className="mt-3 bg-amber-50/90 border border-amber-200 rounded-xl p-2.5 text-xs text-amber-900 font-semibold flex items-center gap-2">
+                                    <i className="fas fa-exclamation-circle text-amber-600"></i>
+                                    <span>Đề thi dành cho Khối {exam.grade}. Em thuộc Khối {activeStudent.grade} nên không thể làm bài.</span>
+                                  </div>
+                                ) : !access.accessible && (
                                   <div className="mt-3 bg-rose-50/80 border border-rose-200 rounded-xl p-2.5 text-xs text-rose-800 font-semibold flex items-center gap-2">
                                     <i className="fas fa-info-circle text-rose-600"></i>
                                     <span>{access.message}</span>
@@ -2002,7 +2022,16 @@
                                   Số câu hỏi: <span className="text-gray-700 font-black">{exam.questions.length} câu</span>
                                 </span>
 
-                                {!access.accessible ? (
+                                {!isSameGrade ? (
+                                  <button
+                                    disabled
+                                    className="bg-gray-200 text-gray-500 font-bold py-2 px-4 rounded-xl text-xs cursor-not-allowed flex items-center gap-1.5"
+                                    title={`Chỉ dành cho học sinh Khối ${exam.grade}`}
+                                  >
+                                    <i className="fas fa-lock text-xs"></i>
+                                    Khác Khối lớp
+                                  </button>
+                                ) : !access.accessible ? (
                                   <button
                                     disabled
                                     className="bg-gray-200 text-gray-400 font-bold py-2 px-4 rounded-xl text-xs cursor-not-allowed flex items-center gap-1.5"
